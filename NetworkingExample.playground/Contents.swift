@@ -1,30 +1,54 @@
 import Foundation
 
 
-private let baseURLString = "https://coingecko.p.rapidapi.com/"
-private let API_HOST = "coingecko.p.rapidapi.com"
+private let baseURLString = "https://api.binance.com/"
+private let API_HOST = "api.binance.com/"
 
+// MARK: - RouterCoordinator
+
+public protocol Endpoint {
+    var method: HTTPMethod { get }
+    var path: String { get }
+    var parameters: Parameters? { get }
+    var useToken: Bool { get }
+    var encoding: ParameterEncoding { get }
+}
+
+
+// MARK: - ResultCallback typealias
+
+public typealias ResultCallback<T> = (Result<T, NetworkStackError>) -> Void
+
+
+// MARK: - WebServiceProtocol
+
+public protocol WebServiceProtocol {
+    func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>)
+}
 
 
 // MARK: - NetworkError
 
-enum NetworkError: Error {
+public enum NetworkStackError: Error {
     case invalidURL
     case requestFailed
     case responseUnsuccessful
     case invalidData
+    case jsonDecodingError
+    case notFound
+    case badRequest
+    case unknownError
 }
-
 
 
 // MARK: - NetworkManager
 
-class NetworkManager {
+public class NetworkManager {
     
     private let baseURL = URL(string: baseURLString)!
-    private let headers = [
-        "X-RapidAPI-Host": "coingecko.p.rapidapi.com"
-    ]
+    
+    // TODO: When user login add your API key here
+    private let headers = ["X-MBX-APIKEY": "binance_api_key_here"]
 
     private var urlSession: URLSession
 
@@ -32,55 +56,44 @@ class NetworkManager {
         self.urlSession = urlSession
     }
 
-    func request<T: Decodable>(route: RouterCoordinator, completion: @escaping (Result<T, NetworkError>) -> Void) {
-        
-        let urlPath = baseURL.appendingPathComponent(route.path)
-        
-        guard var components = URLComponents(url: urlPath, resolvingAgainstBaseURL: false) else {
-            completion(.failure(.invalidURL))
-            return
-        }
 
-        if route.method == .get, let parameters = route.parameters {
-            components.queryItems = parameters.map { URLQueryItem(name: $0.key, value: "\($0.value)") }
-        }
+    func request<T: Decodable>(endpoint: Endpoint, completion: @escaping (Result<T, NetworkError>) -> Void) {
 
-        guard let url = components.url else {
-            completion(.failure(.invalidURL))
-            return
-        }
-        
-        var request = URLRequest(url: url, timeoutInterval: 10.0)
-        request.httpMethod = route.method.rawValue
+        var request = URLRequest(url: baseURL, timeoutInterval: 10.0)
+        request.httpMethod = endpoint.method.rawValue
         request.allHTTPHeaderFields = headers
-
-        // TODO: Handle other HTTP methods and encodings here.
 
         let dataTask = urlSession.dataTask(with: request) { data, response, error in
             if let _ = error {
-                completion(.failure(.requestFailed))
+                OperationQueue.main.addOperation {
+                    completion(.failure(.requestFailed))
+                }
                 return
             }
 
             guard let httpResponse = response as? HTTPURLResponse, 200...299 ~= httpResponse.statusCode else {
-                print("HTTP Status Code: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
-                completion(.failure(.responseUnsuccessful))
+                OperationQueue.main.addOperation {
+                    print("HTTP Status Code: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                    completion(.failure(.responseUnsuccessful))
+                }
                 return
             }
 
             guard let data = data else {
-                completion(.failure(.invalidData))
+                OperationQueue.main.addOperation {
+                    completion(.failure(.invalidData))
+                }
                 return
             }
 
             do {
                 let decoder = JSONDecoder()
                 let responseObject = try decoder.decode(T.self, from: data)
-                DispatchQueue.main.async {
+                OperationQueue.main.addOperation {
                     completion(.success(responseObject))
                 }
             } catch {
-                DispatchQueue.main.async {
+                OperationQueue.main.addOperation {
                     completion(.failure(.invalidData))
                 }
             }
@@ -88,9 +101,8 @@ class NetworkManager {
 
         dataTask.resume()
     }
+
 }
-
-
 
 // MARK: - HTTPMethod
 
@@ -122,10 +134,8 @@ public struct HTTPMethod: RawRepresentable, Equatable, Hashable {
 }
 
 
-
 /// A dictionary of parameters to apply to a `URLRequest`.
 public typealias Parameters = [String: Any]
-
 
 
 // MARK: - ParameterEncoding
@@ -136,22 +146,9 @@ public enum ParameterEncoding {
 }
 
 
+// MARK: - Ticker Endpoint
 
-// MARK: - RouterCoordinator
-
-protocol RouterCoordinator {
-    var method: HTTPMethod { get }
-    var path: String { get }
-    var parameters: Parameters? { get }
-    var useToken: Bool { get }
-    var encoding: ParameterEncoding { get }
-}
-
-
-
-// MARK: - Simple Router
-
-public enum MarketDataRouter: RouterCoordinator {
+public enum TickerEndpoint: Endpoint {
     
     case tickerPrice(request: TickerPriceRequest)
 
@@ -192,49 +189,6 @@ public enum MarketDataRouter: RouterCoordinator {
 }
 
 
-
-// MARK: - Coins Router
-
-public enum CoinsRouter: RouterCoordinator {
-    
-    case coinsList
-
-    public var method: HTTPMethod {
-        switch self {
-        case .coinsList:
-            return .get
-        }
-    }
-
-    public var path: String {
-        switch self {
-        case .coinsList:
-            return "coins/list"
-        }
-    }
-
-    public var parameters: Parameters? {
-            switch self {
-            case .coinsList:
-                return nil
-            }
-        }
-
-    public var useToken: Bool {
-        switch self {
-        case .coinsList:
-            return false
-        }
-    }
-
-    public var encoding: ParameterEncoding {
-        switch self {
-        case .coinsList:
-            return .url
-        }
-    }
-}
-
 // MARK: - Extend Encodable to convert to a dictionary
 
 extension Encodable {
@@ -257,7 +211,7 @@ public struct TickerPriceRequest: Codable {
 
 // MARK: - Ticker Price List Response
 
-struct TickerPriceResponse: Decodable {
+public struct TickerPriceResponse: Decodable {
     let symbol: String
     let price: String
 }
