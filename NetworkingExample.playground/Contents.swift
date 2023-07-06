@@ -1,190 +1,77 @@
 import Foundation
 
-
-private let baseURLString = "https://api.binance.com/"
-private let API_HOST = "api.binance.com/"
-
-// MARK: - RouterCoordinator
-
-public protocol Endpoint {
-    var method: HTTPMethod { get }
-    var path: String { get }
-    var parameters: Parameters? { get }
-    var useToken: Bool { get }
-    var encoding: ParameterEncoding { get }
-}
-
-
-// MARK: - ResultCallback typealias
-
-public typealias ResultCallback<T> = (Result<T, NetworkStackError>) -> Void
-
-
-// MARK: - WebServiceProtocol
-
-public protocol WebServiceProtocol {
-    func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>)
-}
-
-
-// MARK: - NetworkError
-
-public enum NetworkStackError: Error {
-    case invalidURL
-    case requestFailed
-    case responseUnsuccessful
-    case invalidData
-    case jsonDecodingError
-    case notFound
-    case badRequest
-    case unknownError
-}
-
-
-// MARK: - NetworkManager
-
-public class NetworkManager {
-    
-    private let baseURL = URL(string: baseURLString)!
-    
-    // TODO: When user login add your API key here
-    private let headers = ["X-MBX-APIKEY": "binance_api_key_here"]
-
-    private var urlSession: URLSession
-
-    init(urlSession: URLSession = .shared) {
-        self.urlSession = urlSession
-    }
-
-
-    func request<T: Decodable>(endpoint: Endpoint, completion: @escaping (Result<T, NetworkError>) -> Void) {
-
-        var request = URLRequest(url: baseURL, timeoutInterval: 10.0)
-        request.httpMethod = endpoint.method.rawValue
-        request.allHTTPHeaderFields = headers
-
-        let dataTask = urlSession.dataTask(with: request) { data, response, error in
-            if let _ = error {
-                OperationQueue.main.addOperation {
-                    completion(.failure(.requestFailed))
-                }
-                return
-            }
-
-            guard let httpResponse = response as? HTTPURLResponse, 200...299 ~= httpResponse.statusCode else {
-                OperationQueue.main.addOperation {
-                    print("HTTP Status Code: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
-                    completion(.failure(.responseUnsuccessful))
-                }
-                return
-            }
-
-            guard let data = data else {
-                OperationQueue.main.addOperation {
-                    completion(.failure(.invalidData))
-                }
-                return
-            }
-
-            do {
-                let decoder = JSONDecoder()
-                let responseObject = try decoder.decode(T.self, from: data)
-                OperationQueue.main.addOperation {
-                    completion(.success(responseObject))
-                }
-            } catch {
-                OperationQueue.main.addOperation {
-                    completion(.failure(.invalidData))
-                }
-            }
-        }
-
-        dataTask.resume()
-    }
-
-}
-
-// MARK: - HTTPMethod
-
-public struct HTTPMethod: RawRepresentable, Equatable, Hashable {
-    /// `CONNECT` method.
-    public static let connect = HTTPMethod(rawValue: "CONNECT")
-    /// `DELETE` method.
-    public static let delete = HTTPMethod(rawValue: "DELETE")
-    /// `GET` method.
-    public static let get = HTTPMethod(rawValue: "GET")
-    /// `HEAD` method.
-    public static let head = HTTPMethod(rawValue: "HEAD")
-    /// `OPTIONS` method.
-    public static let options = HTTPMethod(rawValue: "OPTIONS")
-    /// `PATCH` method.
-    public static let patch = HTTPMethod(rawValue: "PATCH")
-    /// `POST` method.
-    public static let post = HTTPMethod(rawValue: "POST")
-    /// `PUT` method.
-    public static let put = HTTPMethod(rawValue: "PUT")
-    /// `TRACE` method.
-    public static let trace = HTTPMethod(rawValue: "TRACE")
-
-    public let rawValue: String
-
-    public init(rawValue: String) {
-        self.rawValue = rawValue
-    }
-}
+// Binance API = "https://api.binance.com/"
 
 
 /// A dictionary of parameters to apply to a `URLRequest`.
 public typealias Parameters = [String: Any]
 
 
-// MARK: - ParameterEncoding
+// MARK: - HTTPMethod
+
+public enum HTTPMethod: String {
+    case GET
+    case POST
+    case PUT
+    case PATCH
+    case DELETE
+}
+
+// MARK: - HTTPHeaders
+
+public typealias HTTPHeaders = [String : String]?
+
+
+// MARK: - HTTPTask
+
+public enum HTTPTask {
+    case requestPlain
+    case requestParameters(parameters: Parameters?, encoding: ParameterEncoding)
+    // Other tasks
+}
 
 public enum ParameterEncoding {
     case url
-    // Add any other encodings you need.
+    // Other encodings
 }
 
+// MARK: - Endpoint
 
-// MARK: - Ticker Endpoint
+public protocol Endpoint {
+    var httpMethod: HTTPMethod { get }
+    var httpHeaders: HTTPHeaders? { get }
+    var request: URLRequest? { get }
+    var parameters: Parameters? { get }
+    var useToken: Bool { get }
+    var scheme: String { get }
+    var host: String { get }
+}
 
-public enum TickerEndpoint: Endpoint {
+extension Endpoint {
     
-    case tickerPrice(request: TickerPriceRequest)
+    public var scheme: String { "https" }
 
-    public var method: HTTPMethod {
-        switch self {
-        case .tickerPrice:
-            return .get
-        }
-    }
-
-    public var path: String {
-        switch self {
-        case .tickerPrice:
-            return "/api/v3/ticker/price"
-        }
-    }
-
-    public var parameters: Parameters? {
-            switch self {
-            case .tickerPrice(let request):
-                return try? request.asDictionary()
+    public var host: String { "api.binance.com" }
+    
+    public func request(_ endpoint: String) -> URLRequest? {
+        var urlComponents = URLComponents()
+        urlComponents.scheme = scheme
+        urlComponents.host = host
+        urlComponents.path = endpoint
+        guard let url = urlComponents.url else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = httpMethod.rawValue
+        
+        if let httpHeaders = httpHeaders {
+            dump("Http Headers: \(String(describing: httpHeaders))")
+            httpHeaders?.forEach { element in // element ["X-MBX-APIKEY": "binance_api_key_here"] as an example
+                request.setValue(
+                    element.value,
+                    forHTTPHeaderField: element.key
+                )
             }
         }
-
-    public var useToken: Bool {
-        switch self {
-        case .tickerPrice:
-            return false
-        }
-    }
-
-    public var encoding: ParameterEncoding {
-        switch self {
-        case .tickerPrice:
-            return .url
-        }
+        return request
     }
 }
 
@@ -202,11 +89,153 @@ extension Encodable {
 }
 
 
+// MARK: - Ticker Endpoint
+
+public enum TickerEndpoint: Endpoint {
+    
+    case tickerPrice(request: TickerPriceRequest)
+    
+    public var httpMethod: HTTPMethod {
+        switch self {
+        case .tickerPrice:
+            return .GET
+        }
+    }
+    
+    public var httpHeaders: HTTPHeaders? {
+        switch self {
+        case .tickerPrice: return nil
+        }
+    }
+    
+    public var request: URLRequest? {
+        switch self {
+        case .tickerPrice:
+            return request("/api/v3/ticker/price")
+        }
+    }
+    
+    public var parameters: Parameters? {
+        switch self {
+        case .tickerPrice(let request):
+            return try? request.asDictionary()
+        }
+    }
+        
+    public var task: HTTPTask {
+        switch self {
+        case .tickerPrice(let request):
+            return .requestParameters(parameters: try? request.asDictionary(), encoding: .url)
+        }
+    }
+    
+    public var useToken: Bool {
+        switch self {
+        case .tickerPrice:
+            return false
+        }
+    }
+}
+
+
+
+// MARK: - NetworkError
+
+public enum NetworkError: Error {
+    case invalidURL
+    case requestFailed
+    case responseUnsuccessful
+    case invalidData
+    case jsonDecodingError
+    case notFound
+    case badRequest
+    case unknownError
+    case invalidRequest
+}
+
+
+// MARK: - ResultCallback typealias
+
+public typealias ResultCallback<T> = (Result<T, NetworkError>) -> Void
+
+
+// MARK: - NetworkingProtocol
+
+public protocol NetworkingProtocol {
+    func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>)
+}
+
+
+// MARK: - NetworkManager
+
+public final class Networking: NetworkingProtocol {
+    
+    private var urlSession: URLSession
+    
+    init(urlSession: URLSession = .shared) {
+        self.urlSession = urlSession
+    }
+    
+    
+    public func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>) {
+        
+        guard let request = endpoint.request else {
+            return OperationQueue.main.addOperation({ completition(.failure(NetworkError.invalidRequest)) })
+        }
+                
+        let task = urlSession.dataTask(with: request) { (data, response, error) in
+            dump(request)
+            
+            if let error = error {
+                return OperationQueue.main.addOperation({ completition(.failure(.requestFailed)) })
+            }
+            
+            guard let data = data else {
+                return OperationQueue.main.addOperation({ completition(.failure(.invalidData)) })
+            }
+            
+            do {
+                let jsonResponse = try JSONSerialization.jsonObject(with: data, options: [])
+                debugPrint(jsonResponse)
+            } catch {
+                debugPrint("Error", error)
+                return OperationQueue.main.addOperation({ completition(.failure(.jsonDecodingError)) })
+            }
+            
+            guard let response = response as? HTTPURLResponse else {
+                return OperationQueue.main.addOperation({ completition(.failure(.responseUnsuccessful)) })
+            }
+            dump(response)
+            
+            switch response.statusCode {
+            case 200...299:
+                do {
+                    let responseObject = try JSONDecoder().decode(T.self, from: data)
+                    OperationQueue.main.addOperation({ completition(.success(responseObject)) })
+                } catch {
+                    OperationQueue.main.addOperation({ completition(.failure(.jsonDecodingError)) })
+                }
+            case 400...499:
+                OperationQueue.main.addOperation({ completition(.failure(.notFound)) })
+            case 500...599:
+                OperationQueue.main.addOperation({ completition(.failure(.badRequest)) })
+            default:
+                OperationQueue.main.addOperation({ completition(.failure(.unknownError)) })
+            }
+        }
+        
+        task.resume()
+        
+    }
+    
+    
+}
+
 
 // MARK: - Ticker Price Request Model
 
 public struct TickerPriceRequest: Codable {
-    var symbol: String
+    var symbol: String?
 }
 
 // MARK: - Ticker Price List Response
@@ -217,38 +246,24 @@ public struct TickerPriceResponse: Decodable {
 }
 
 
-
-
-
-
 // MARK: - USAGE //////////////////////////////////////////////////////////////////////
 
-let networkManager = NetworkManager()
+let networkManager = Networking()
 
 
-func getPrice() {
-    let priceRequest = PriceRequest(ids: "bitcoin", vsCurrencies: "usd")
-    
-    networkManager.request(route: SimpleRouter.price(request: priceRequest)) { (result: Result<PriceResponse, NetworkError>) in
-        switch result {
-        case .success(let priceResponse):
-            print("Bitcoin price in USD: \(priceResponse.bitcoin.usd)")
-        case .failure(let error):
-            print("Failed to get price: \(error)")
+let tickerPriceRequest = TickerPriceRequest(symbol: nil)
+
+networkManager.request(TickerEndpoint.tickerPrice(request: tickerPriceRequest)) { (result: Result<[TickerPriceResponse], NetworkError>) in
+    switch result {
+    case .success(let responseArray):
+        for response in responseArray {
+            print("Symbol: \(response.symbol), Price: \(response.price)")
         }
+    case .failure(let error):
+        print("An error occurred: \(error)")
     }
 }
 
-func getCoinList() {
-    networkManager.request(route: CoinsRouter.coinsList) { (result: Result<CoinsListResponse, NetworkError>) in
-        switch result {
-        case .success(let coinsListResponse):
-            print("Coins count: \(coinsListResponse.count)")
-        case .failure(let error):
-            print("Failed to get price: \(error)")
-        }
-    }
-}
 
-//getPrice()
-getCoinList()
+
+
