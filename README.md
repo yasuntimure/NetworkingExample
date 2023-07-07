@@ -1,6 +1,6 @@
-# NetworkingExample
+# Networking Example
 
-## Binance API Swift Wrapper
+## Implementation with Binance API
 
 This project is a Swift implementation of the Binance API, encapsulated into a simple and easy-to-use networking layer.
 
