@@ -50,7 +50,7 @@ public protocol Endpoint {
 extension Endpoint {
     
     public var scheme: String { "https" }
-
+    
     public var host: String { "api.binance.com" }
     
     public func request(_ endpoint: String) -> URLRequest? {
@@ -121,7 +121,7 @@ public enum TickerEndpoint: Endpoint {
             return try? request.asDictionary()
         }
     }
-        
+    
     public var task: HTTPTask {
         switch self {
         case .tickerPrice(let request):
@@ -136,7 +136,6 @@ public enum TickerEndpoint: Endpoint {
         }
     }
 }
-
 
 
 // MARK: - NetworkError
@@ -176,37 +175,42 @@ public final class Networking: NetworkingProtocol {
         self.urlSession = urlSession
     }
     
-    
     public func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>) {
         
+        // Check for request
         guard let request = endpoint.request else {
             return OperationQueue.main.addOperation({ completition(.failure(NetworkError.invalidRequest)) })
         }
-                
+        
         let task = urlSession.dataTask(with: request) { (data, response, error) in
             dump(request)
             
+            // Check for error
             if let error = error {
                 return OperationQueue.main.addOperation({ completition(.failure(.requestFailed)) })
             }
             
+            // Check for data
             guard let data = data else {
                 return OperationQueue.main.addOperation({ completition(.failure(.invalidData)) })
             }
             
+            // Parse JSON and debugPrint
             do {
                 let jsonResponse = try JSONSerialization.jsonObject(with: data, options: [])
                 debugPrint(jsonResponse)
             } catch {
-                debugPrint("Error", error)
+                debugPrint("Parse Error", error)
                 return OperationQueue.main.addOperation({ completition(.failure(.jsonDecodingError)) })
             }
             
+            // Check for response
             guard let response = response as? HTTPURLResponse else {
                 return OperationQueue.main.addOperation({ completition(.failure(.responseUnsuccessful)) })
             }
             dump(response)
             
+            // Handle Status Code
             switch response.statusCode {
             case 200...299:
                 do {
@@ -225,10 +229,7 @@ public final class Networking: NetworkingProtocol {
         }
         
         task.resume()
-        
     }
-    
-    
 }
 
 
@@ -240,7 +241,9 @@ public struct TickerPriceRequest: Codable {
 
 // MARK: - Ticker Price List Response
 
-public struct TickerPriceResponse: Decodable {
+typealias TickerPriceResponse = [TickerPrice]
+
+public struct TickerPrice: Decodable {
     let symbol: String
     let price: String
 }
@@ -249,11 +252,9 @@ public struct TickerPriceResponse: Decodable {
 // MARK: - USAGE //////////////////////////////////////////////////////////////////////
 
 let networkManager = Networking()
-
-
 let tickerPriceRequest = TickerPriceRequest(symbol: nil)
 
-networkManager.request(TickerEndpoint.tickerPrice(request: tickerPriceRequest)) { (result: Result<[TickerPriceResponse], NetworkError>) in
+networkManager.request(TickerEndpoint.tickerPrice(request: tickerPriceRequest)) { (result: Result<TickerPriceResponse, NetworkError>) in
     switch result {
     case .success(let responseArray):
         for response in responseArray {
