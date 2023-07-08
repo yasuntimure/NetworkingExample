@@ -51,8 +51,3 @@ The project does not depend on any third-party libraries.
 ## Author
 
 Eyup Yasuntimur
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
-
