@@ -3,10 +3,6 @@ import Foundation
 // Binance API = "https://api.binance.com/"
 
 
-/// A dictionary of parameters to apply to a `URLRequest`.
-public typealias Parameters = [String: Any]
-
-
 // MARK: - HTTPMethod
 
 public enum HTTPMethod: String {
@@ -17,9 +13,14 @@ public enum HTTPMethod: String {
     case DELETE
 }
 
+
+
 // MARK: - HTTPHeaders
 
 public typealias HTTPHeaders = [String : String]?
+
+/// A dictionary of parameters to apply to a `URLRequest`.
+public typealias Parameters = [String: Any]
 
 
 // MARK: - HTTPTask
@@ -35,17 +36,21 @@ public enum ParameterEncoding {
     // Other encodings
 }
 
+
+
 // MARK: - Endpoint
 
 public protocol Endpoint {
+    var request: URLRequest? { get }
     var httpMethod: HTTPMethod { get }
     var httpHeaders: HTTPHeaders? { get }
-    var request: URLRequest? { get }
-    var parameters: Parameters? { get }
+    var httpTask: HTTPTask { get }
     var useToken: Bool { get }
     var scheme: String { get }
     var host: String { get }
 }
+
+
 
 extension Endpoint {
     
@@ -76,6 +81,7 @@ extension Endpoint {
 }
 
 
+
 // MARK: - Extend Encodable to convert to a dictionary
 
 extension Encodable {
@@ -89,11 +95,19 @@ extension Encodable {
 }
 
 
+
 // MARK: - Ticker Endpoint
 
 public enum TickerEndpoint: Endpoint {
     
-    case tickerPrice(request: TickerPriceRequest)
+    case tickerPrice(dto: TickerPriceDTO)
+    
+    public var request: URLRequest? {
+        switch self {
+        case .tickerPrice:
+            return request("/api/v3/ticker/price")
+        }
+    }
     
     public var httpMethod: HTTPMethod {
         switch self {
@@ -108,24 +122,10 @@ public enum TickerEndpoint: Endpoint {
         }
     }
     
-    public var request: URLRequest? {
+    public var httpTask: HTTPTask {
         switch self {
-        case .tickerPrice:
-            return request("/api/v3/ticker/price")
-        }
-    }
-    
-    public var parameters: Parameters? {
-        switch self {
-        case .tickerPrice(let request):
-            return try? request.asDictionary()
-        }
-    }
-    
-    public var task: HTTPTask {
-        switch self {
-        case .tickerPrice(let request):
-            return .requestParameters(parameters: try? request.asDictionary(), encoding: .url)
+        case .tickerPrice(let dto):
+            return .requestParameters(parameters: try? dto.asDictionary(), encoding: .url)
         }
     }
     
@@ -136,6 +136,7 @@ public enum TickerEndpoint: Endpoint {
         }
     }
 }
+
 
 
 // MARK: - NetworkError
@@ -153,9 +154,11 @@ public enum NetworkError: Error {
 }
 
 
+
 // MARK: - ResultCallback typealias
 
 public typealias ResultCallback<T> = (Result<T, NetworkError>) -> Void
+
 
 
 // MARK: - NetworkingProtocol
@@ -163,6 +166,7 @@ public typealias ResultCallback<T> = (Result<T, NetworkError>) -> Void
 public protocol NetworkingProtocol {
     func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>)
 }
+
 
 
 // MARK: - NetworkManager
@@ -233,11 +237,14 @@ public final class Networking: NetworkingProtocol {
 }
 
 
+
 // MARK: - Ticker Price Request Model
 
-public struct TickerPriceRequest: Codable {
+public struct TickerPriceDTO: Codable {
     var symbol: String?
 }
+
+
 
 // MARK: - Ticker Price List Response
 
@@ -249,12 +256,14 @@ public struct TickerPrice: Decodable {
 }
 
 
-// MARK: - USAGE //////////////////////////////////////////////////////////////////////
 
-let networkManager = Networking()
-let tickerPriceRequest = TickerPriceRequest(symbol: nil)
+// MARK: - USAGE
 
-networkManager.request(TickerEndpoint.tickerPrice(request: tickerPriceRequest)) { (result: Result<TickerPriceResponse, NetworkError>) in
+let networking = Networking()
+let tickerPriceDTO = TickerPriceDTO(symbol: nil)
+let endpoint = TickerEndpoint.tickerPrice(dto: tickerPriceDTO)
+
+networking.request(endpoint) { (result: Result<TickerPriceResponse, NetworkError>) in
     switch result {
     case .success(let responseArray):
         for response in responseArray {
@@ -264,7 +273,6 @@ networkManager.request(TickerEndpoint.tickerPrice(request: tickerPriceRequest)) 
         print("An error occurred: \(error)")
     }
 }
-
 
 
 
