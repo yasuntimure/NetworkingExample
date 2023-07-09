@@ -14,7 +14,6 @@ public enum HTTPMethod: String {
 }
 
 
-
 // MARK: - HTTPHeaders
 
 public typealias HTTPHeaders = [String : String]?
@@ -37,7 +36,6 @@ public enum ParameterEncoding {
 }
 
 
-
 // MARK: - Endpoint
 
 public protocol Endpoint {
@@ -49,8 +47,6 @@ public protocol Endpoint {
     var scheme: String { get }
     var host: String { get }
 }
-
-
 
 extension Endpoint {
     
@@ -81,7 +77,6 @@ extension Endpoint {
 }
 
 
-
 // MARK: - Extend Encodable to convert to a dictionary
 
 extension Encodable {
@@ -94,6 +89,22 @@ extension Encodable {
     }
 }
 
+
+// MARK: - Ticker Price Request Model
+
+public struct TickerPriceDTO: Codable {
+    var symbol: String?
+}
+
+
+// MARK: - Ticker Price List Response
+
+typealias TickerPriceResponse = [TickerPrice]
+
+public struct TickerPrice: Decodable {
+    let symbol: String
+    let price: String
+}
 
 
 // MARK: - Ticker Endpoint
@@ -138,26 +149,6 @@ public enum TickerEndpoint: Endpoint {
 }
 
 
-
-// MARK: - Ticker Price Request Model
-
-public struct TickerPriceDTO: Codable {
-    var symbol: String?
-}
-
-
-
-// MARK: - Ticker Price List Response
-
-typealias TickerPriceResponse = [TickerPrice]
-
-public struct TickerPrice: Decodable {
-    let symbol: String
-    let price: String
-}
-
-
-
 // MARK: - NetworkError
 
 public enum NetworkError: Error {
@@ -173,85 +164,33 @@ public enum NetworkError: Error {
 }
 
 
-
-// MARK: - ResultCallback typealias
-
-public typealias ResultCallback<T> = (Result<T, NetworkError>) -> Void
-
-
-
 // MARK: - NetworkingProtocol
 
 public protocol NetworkingProtocol {
-    func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>)
+    func request<T: Decodable>(_ endpoint: Endpoint) async throws -> T
 }
 
-
-
-// MARK: - NetworkManager
+// MARK: - Networking Class
 
 public final class Networking: NetworkingProtocol {
-    
-    private var urlSession: URLSession
-    
-    init(urlSession: URLSession = .shared) {
-        self.urlSession = urlSession
-    }
-    
-    public func request<T: Decodable>(_ endpoint: Endpoint, completition: @escaping ResultCallback<T>) {
+    public func request<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
+        guard let request = endpoint.request else { throw NetworkError.invalidRequest }
         
-        // Check for request
-        guard let request = endpoint.request else {
-            return OperationQueue.main.addOperation({ completition(.failure(NetworkError.invalidRequest)) })
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse else { throw NetworkError.responseUnsuccessful }
+        
+        switch httpResponse.statusCode {
+        case 200...299:
+            let responseObject = try JSONDecoder().decode(T.self, from: data)
+            return responseObject
+        case 400...499:
+            throw NetworkError.notFound
+        case 500...599:
+            throw NetworkError.badRequest
+        default:
+            throw NetworkError.unknownError
         }
-        
-        let task = urlSession.dataTask(with: request) { (data, response, error) in
-            dump(request)
-            
-            // Check for error
-            if let error = error {
-                return OperationQueue.main.addOperation({ completition(.failure(.requestFailed)) })
-            }
-            
-            // Check for data
-            guard let data = data else {
-                return OperationQueue.main.addOperation({ completition(.failure(.invalidData)) })
-            }
-            
-            // Parse JSON and debugPrint
-            do {
-                let jsonResponse = try JSONSerialization.jsonObject(with: data, options: [])
-                debugPrint(jsonResponse)
-            } catch {
-                debugPrint("Parse Error", error)
-                return OperationQueue.main.addOperation({ completition(.failure(.jsonDecodingError)) })
-            }
-            
-            // Check for response
-            guard let response = response as? HTTPURLResponse else {
-                return OperationQueue.main.addOperation({ completition(.failure(.responseUnsuccessful)) })
-            }
-            dump(response)
-            
-            // Handle Status Code
-            switch response.statusCode {
-            case 200...299:
-                do {
-                    let responseObject = try JSONDecoder().decode(T.self, from: data)
-                    OperationQueue.main.addOperation({ completition(.success(responseObject)) })
-                } catch {
-                    OperationQueue.main.addOperation({ completition(.failure(.jsonDecodingError)) })
-                }
-            case 400...499:
-                OperationQueue.main.addOperation({ completition(.failure(.notFound)) })
-            case 500...599:
-                OperationQueue.main.addOperation({ completition(.failure(.badRequest)) })
-            default:
-                OperationQueue.main.addOperation({ completition(.failure(.unknownError)) })
-            }
-        }
-        
-        task.resume()
     }
 }
 
@@ -262,16 +201,17 @@ let networking = Networking()
 let tickerPriceDTO = TickerPriceDTO(symbol: nil)
 let endpoint = TickerEndpoint.tickerPrice(dto: tickerPriceDTO)
 
-networking.request(endpoint) { (result: Result<TickerPriceResponse, NetworkError>) in
-    switch result {
-    case .success(let responseArray):
+Task {
+    do {
+        let responseArray: TickerPriceResponse = try await networking.request(endpoint)
         for response in responseArray {
             print("Symbol: \(response.symbol), Price: \(response.price)")
         }
-    case .failure(let error):
+    } catch {
         print("An error occurred: \(error)")
     }
 }
+
 
 
 
